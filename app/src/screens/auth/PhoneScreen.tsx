@@ -13,7 +13,7 @@ function normalizePhone(phone: string) {
   return phone.replace(/\D/g, '');
 }
 
-export function PhoneScreen({ navigation }: Props) {
+export function PhoneScreen({ navigation, route }: Props) {
   const [phone, setPhone] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,7 +30,7 @@ export function PhoneScreen({ navigation }: Props) {
     setError(null);
 
     try {
-      const response = await register(fullPhone);
+      const response = await register(fullPhone, route.params.activityType);
       navigation.navigate('Otp', {
         identifier: response.identifier ?? fullPhone,
         phone: fullPhone,
