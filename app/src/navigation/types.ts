@@ -1,5 +1,9 @@
+export type ActivityType = 'COMMERCE_GENERAL' | 'MECANIQUE' | 'ALIMENTATION' | 'SERVICES' | 'COIFFURE' | 'AUTRE';
+
 export type AuthStackParamList = {
-  Phone: undefined;
+  Phone: {
+    activityType: ActivityType;
+  };
   Otp: {
     identifier: string;
     phone: string;
@@ -13,9 +17,15 @@ export type AuthStackParamList = {
   SignIn: undefined;
 };
 
+export type OperationType = 'VENTE' | 'ACHAT' | 'DEPENSE' | 'RECETTE';
+
 export type MainTabParamList = {
   Home: undefined;
-  Operations: undefined;
+  Operations:
+    | {
+        initialOperationType?: OperationType;
+      }
+    | undefined;
   Stock: undefined;
   Profile: undefined;
 };
