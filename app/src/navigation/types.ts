@@ -1,5 +1,9 @@
+export type ActivityType = 'COMMERCE_GENERAL' | 'MECANIQUE' | 'ALIMENTATION' | 'SERVICES' | 'COIFFURE' | 'AUTRE';
+
 export type AuthStackParamList = {
-  Phone: undefined;
+  Phone: {
+    activityType: ActivityType;
+  };
   Otp: {
     identifier: string;
     phone: string;
