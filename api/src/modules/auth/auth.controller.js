@@ -21,17 +21,17 @@ const logger      = require('../../utils/logger');
 // ---------------------------------------------------------------------------
 
 /**
- * Inscription d'un nouveau commerçant.
- * Crée le compte et envoie un OTP de vérification (SMS ou email).
+ * Démarre l'inscription d'un nouveau commerçant.
+ * Envoie un OTP de vérification (SMS ou email) avant création du compte.
  *
  * Body : { phone?, email?, activity_type?, boutique_name? }
- * Réponse 201 : { userId, identifier }
+ * Réponse 201 : { identifier }
  */
 async function register(req, res) {
   try {
     const result = await authService.register(req.body);
     return response.created(res, result,
-      'Compte créé avec succès. Un code de vérification a été envoyé.'
+      'Code de vérification envoyé. Le compte sera créé après validation OTP.'
     );
   } catch (err) {
     return handleServiceError(res, err, 'register');
