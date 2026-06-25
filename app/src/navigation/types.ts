@@ -1,3 +1,5 @@
+import { NavigatorScreenParams } from '@react-navigation/native';
+
 export type ActivityType = 'COMMERCE_GENERAL' | 'MECANIQUE' | 'ALIMENTATION' | 'SERVICES' | 'COIFFURE' | 'AUTRE';
 
 export type AuthStackParamList = {
@@ -19,13 +21,23 @@ export type AuthStackParamList = {
 
 export type OperationType = 'VENTE' | 'ACHAT' | 'DEPENSE' | 'RECETTE';
 
-export type MainTabParamList = {
-  Home: undefined;
-  Operations:
+export type OperationsStackParamList = {
+  OperationsList:
     | {
         initialOperationType?: OperationType;
       }
     | undefined;
+  OperationForm:
+    | {
+        operationId?: string | number;
+        initialOperationType?: OperationType;
+      }
+    | undefined;
+};
+
+export type MainTabParamList = {
+  Home: undefined;
+  Operations: NavigatorScreenParams<OperationsStackParamList> | undefined;
   Stock: undefined;
   Profile: undefined;
 };

@@ -79,7 +79,7 @@ export function HomeScreen({ navigation }: Props) {
   const hasActivity = metrics.some((metric) => metric.value !== 0);
 
   function openOperationForm(type: OperationType) {
-    navigation.navigate('Operations', { initialOperationType: type });
+    navigation.navigate('Operations', { screen: 'OperationForm', params: { initialOperationType: type } });
   }
 
   return (
