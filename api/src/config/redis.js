@@ -124,6 +124,7 @@ async function close() {
 const KEYS = {
   // OTP
   otpAttempts: (identifier) => `otp:attempts:${identifier}`,
+  pendingRegistration: (identifier) => `auth:pending-registration:${identifier}`,
 
   // Token blacklist (refresh tokens révoqués)
   tokenBlacklist: (hash) => `token:blacklist:${hash}`,

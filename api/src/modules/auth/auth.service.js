@@ -23,18 +23,20 @@ const { generateTokens, verifyRefreshToken, hashToken } = require('../../utils/j
 // ---------------------------------------------------------------------------
 
 /**
- * Crée un nouveau compte commerçant et envoie un OTP de vérification.
+ * Démarre une inscription et envoie un OTP de vérification.
+ * Le compte utilisateur n'est créé qu'après validation du code OTP.
  *
  * @param {Object} data
  * @param {string} [data.phone]
  * @param {string} [data.email]
  * @param {string} [data.activity_type]
  * @param {string} [data.boutique_name]
- * @returns {Promise<{ userId: string, identifier: string }>}
+ * @returns {Promise<{ identifier: string }>}
  * @throws Si le téléphone/email est déjà utilisé
  */
 async function register(data) {
   const { phone, email, activity_type = 'COMMERCE_GENERAL', boutique_name } = data;
+  const identifier = phone || email;
 
   // Vérifier unicité du téléphone ou de l'email
   if (phone) {
@@ -61,22 +63,16 @@ async function register(data) {
     }
   }
 
-  // Créer l'utilisateur — pas encore de mot de passe (vient après OTP)
-  const { rows } = await db.query(
-    `INSERT INTO users (phone, email, activity_type, boutique_name, password_hash)
-     VALUES ($1, $2, $3, $4, $5)
-     RETURNING id`,
-    [phone || null, email || null, activity_type, boutique_name || null, 'PENDING']
-  );
+  await createAndSendPendingRegistrationOtp({
+    identifier,
+    phone: phone || null,
+    email: email || null,
+    activity_type,
+    boutique_name: boutique_name || null,
+  });
 
-  const userId     = rows[0].id;
-  const identifier = phone || email;
-
-  // Générer et envoyer l'OTP
-  await createAndSendOtp(userId, identifier, phone ? 'sms' : 'email');
-
-  logger.info('[Auth] Inscription réussie — OTP envoyé', { userId, identifier });
-  return { userId, identifier };
+  logger.info('[Auth] Inscription en attente — OTP envoyé', { identifier });
+  return { identifier };
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +88,12 @@ async function register(data) {
  * @returns {Promise<{ userId: string, requiresPassword: boolean }>}
  */
 async function verifyOtp(identifier, token) {
+  const pendingRegistration = await getPendingRegistration(identifier);
+
+  if (pendingRegistration) {
+    return verifyPendingRegistrationOtp(identifier, token, pendingRegistration);
+  }
+
   // Récupérer l'OTP le plus récent non utilisé pour cet identifiant
   const { rows } = await db.query(
     `SELECT o.id, o.user_id, o.expires_at, o.attempts, u.password_hash
@@ -459,6 +461,20 @@ async function changePassword(userId, currentPassword, newPassword) {
  * @returns {Promise<void>}
  */
 async function resendOtp(identifier) {
+  const pendingRegistration = await getPendingRegistration(identifier);
+
+  if (pendingRegistration) {
+    await createAndSendPendingRegistrationOtp({
+      identifier,
+      phone: pendingRegistration.phone || null,
+      email: pendingRegistration.email || null,
+      activity_type: pendingRegistration.activity_type,
+      boutique_name: pendingRegistration.boutique_name || null,
+    });
+    logger.info('[Auth] OTP de pré-inscription renvoyé', { identifier });
+    return;
+  }
+
   const { rows } = await db.query(
     `SELECT id FROM users WHERE phone = $1 OR email = $1 LIMIT 1`,
     [identifier]
@@ -480,6 +496,109 @@ async function resendOtp(identifier) {
 // ---------------------------------------------------------------------------
 // Helpers privés
 // ---------------------------------------------------------------------------
+
+/**
+ * Retourne le TTL Redis utilisé pour garder une inscription en attente.
+ */
+function getPendingRegistrationTtlSec() {
+  return config.otp.expiresMinutes * 60;
+}
+
+/**
+ * Récupère une inscription en attente depuis Redis.
+ */
+async function getPendingRegistration(identifier) {
+  return cache.get(cache.KEYS.pendingRegistration(identifier));
+}
+
+/**
+ * Crée un OTP temporaire pour une inscription qui n'existe pas encore en DB.
+ */
+async function createAndSendPendingRegistrationOtp(registration) {
+  const otp = generateOtp();
+  const channel = registration.phone ? 'sms' : 'email';
+
+  await cache.set(
+    cache.KEYS.pendingRegistration(registration.identifier),
+    { ...registration, token: otp },
+    getPendingRegistrationTtlSec()
+  );
+
+  let smsMeta = {};
+  if (channel === 'sms') {
+    smsMeta = await sendOtpSms(registration.identifier, otp);
+  } else {
+    logger.info('[Auth] OTP email (non encore implémenté)', {
+      identifier: registration.identifier,
+      otp,
+    });
+  }
+
+  return config.sms.bypass ? { otpBypass: smsMeta.otp } : {};
+}
+
+/**
+ * Vérifie un OTP de pré-inscription et crée le compte seulement après succès.
+ */
+async function verifyPendingRegistrationOtp(identifier, token, pendingRegistration) {
+  if (pendingRegistration.token !== token) {
+    const err = new Error('Code OTP invalide ou déjà utilisé');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const { phone, email, activity_type, boutique_name } = pendingRegistration;
+
+  const result = await db.transaction(async (client) => {
+    if (phone) {
+      const existing = await client.query(
+        'SELECT id FROM users WHERE phone = $1',
+        [phone]
+      );
+      if (existing.rowCount > 0) {
+        const err = new Error('Ce numéro de téléphone est déjà associé à un compte');
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+
+    if (email) {
+      const existing = await client.query(
+        'SELECT id FROM users WHERE email = $1',
+        [email]
+      );
+      if (existing.rowCount > 0) {
+        const err = new Error('Cette adresse e-mail est déjà associée à un compte');
+        err.statusCode = 409;
+        throw err;
+      }
+    }
+
+    const { rows } = await client.query(
+      `INSERT INTO users (phone, email, activity_type, boutique_name, password_hash, is_verified)
+       VALUES ($1, $2, $3, $4, $5, TRUE)
+       RETURNING id`,
+      [
+        phone || null,
+        email || null,
+        activity_type || 'COMMERCE_GENERAL',
+        boutique_name || null,
+        'PENDING',
+      ]
+    );
+
+    return { userId: rows[0].id, requiresPassword: true };
+  });
+
+  await cache.del(cache.KEYS.pendingRegistration(identifier));
+
+  logger.info('[Auth] OTP pré-inscription vérifié — compte créé', {
+    userId: result.userId,
+    identifier,
+  });
+
+  return result;
+}
 
 /**
  * Crée un OTP en base et l'envoie par SMS ou email.
