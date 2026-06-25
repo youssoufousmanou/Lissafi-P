@@ -17,9 +17,15 @@ export type AuthStackParamList = {
   SignIn: undefined;
 };
 
+export type OperationType = 'VENTE' | 'ACHAT' | 'DEPENSE' | 'RECETTE';
+
 export type MainTabParamList = {
   Home: undefined;
-  Operations: undefined;
+  Operations:
+    | {
+        initialOperationType?: OperationType;
+      }
+    | undefined;
   Stock: undefined;
   Profile: undefined;
 };
