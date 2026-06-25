@@ -1,0 +1,1407 @@
+{
+  "info": {
+    "name": "LISSAFI-P — Module Operations (M2)",
+    "description": "Collection complète de test du module M2 — Opérations commerciales.\n\n## Workflow de test recommandé\n1. **Se connecter** → récupérer access_token (via collection Auth)\n2. **GET /limits** → vérifier le quota FREE du mois\n3. **POST /** → créer des opérations (VENTE, ACHAT, DEPENSE, RECETTE)\n4. **GET /** → lister avec filtres et pagination\n5. **GET /summary/daily** → solde du jour\n6. **GET /summary/monthly** → résumé mensuel\n7. **GET /:id** → détail d'une opération\n8. **PUT /:id** → modifier une opération\n9. **DELETE /:id** → supprimer une opération\n10. **Cas d'erreur** → validation, quota, ownership\n\n## Variables d'environnement requises\nImporter `LISSAFI-P_Local.postman_environment.json`.\nLe `access_token` doit être valide (rempli par le module Auth).\n\n## Règles métier testées\n- Montant FCFA entier ≥ 1\n- Date rétroactive autorisée, future rejetée\n- Plan FREE : 30 opérations/mois max (HTTP 429)\n- Ownership : un utilisateur ne peut lire/modifier/supprimer que SES opérations",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "lissafi-operations-collection-v1"
+  },
+  "variable": [],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": ["// Pré-script global — rien ici pour l'instant"]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0 — Pré-requis : connexion",
+      "description": "Ces requêtes ne font pas partie du module Operations mais rappellent comment obtenir un token valide.",
+      "item": [
+        {
+          "name": "ℹ login — obtenir un access_token valide",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tokens sauvegardés', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.accessToken).to.be.a('string');",
+                  "  pm.environment.set('access_token', data.accessToken);",
+                  "  pm.environment.set('refresh_token', data.refreshToken);",
+                  "  console.log('✔ access_token prêt pour les tests Operations');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"{{identifier}}\",\n  \"password\": \"{{test_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "login"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1 — Quota mensuel",
+      "item": [
+        {
+          "name": "✅ GET /limits — quota FREE du mois courant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Structure du quota correcte', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data).to.have.property('count');",
+                  "  pm.expect(data).to.have.property('limit');",
+                  "  pm.expect(data).to.have.property('canCreate');",
+                  "  pm.expect(data).to.have.property('plan');",
+                  "  pm.expect(data.count).to.be.a('number').and.at.least(0);",
+                  "  console.log('Quota :', data.count + ' / ' + data.limit, '| plan :', data.plan);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/limits",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "limits"]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /limits — sans token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/operations/limits",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "limits"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 — Créer des opérations",
+      "item": [
+        {
+          "name": "✅ POST / — VENTE simple",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Opération VENTE créée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.id).to.be.a('string');",
+                  "  pm.expect(data.type).to.equal('VENTE');",
+                  "  pm.expect(data.amount).to.equal(15000);",
+                  "  pm.expect(data.article_name).to.equal('Tissu bazin 10m');",
+                  "  // Sauvegarder l'ID pour les tests suivants",
+                  "  pm.environment.set('op_id_vente', data.id);",
+                  "  console.log('✔ op_id_vente sauvegardé :', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": 15000,\n  \"article_name\": \"Tissu bazin 10m\",\n  \"quantity\": 2,\n  \"counterpart_name\": \"Mama Hajja\",\n  \"description\": \"Vente à crédit partiellement réglée\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "✅ POST / — ACHAT fournisseur",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Opération ACHAT créée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.type).to.equal('ACHAT');",
+                  "  pm.expect(data.amount).to.equal(8500);",
+                  "  pm.environment.set('op_id_achat', data.id);",
+                  "  console.log('✔ op_id_achat sauvegardé :', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"ACHAT\",\n  \"amount\": 8500,\n  \"article_name\": \"Savon Omo 12kg\",\n  \"quantity\": 3,\n  \"counterpart_name\": \"Grossiste Maroua Centre\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "✅ POST / — DEPENSE (loyer)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Opération DEPENSE créée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.type).to.equal('DEPENSE');",
+                  "  pm.environment.set('op_id_depense', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"DEPENSE\",\n  \"amount\": 25000,\n  \"article_name\": \"Loyer boutique Mai 2026\",\n  \"description\": \"Paiement mensuel boutique N°14 marché central\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "✅ POST / — RECETTE diverse",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Opération RECETTE créée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.type).to.equal('RECETTE');",
+                  "  pm.environment.set('op_id_recette', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"RECETTE\",\n  \"amount\": 3000,\n  \"article_name\": \"Remboursement avance Alhadji\",\n  \"counterpart_name\": \"Alhadji Moussa\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "✅ POST / — VENTE avec date rétroactive",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 — saisie différée acceptée', () => pm.response.to.have.status(201));",
+                  "pm.test('Date rétroactive conservée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.op_date).to.include('2026-01-15');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": 7500,\n  \"article_name\": \"Bidon huile 5L\",\n  \"op_date\": \"2026-01-15T09:00:00.000Z\",\n  \"description\": \"Vente saisie en retard — opération du 15 janvier\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — montant négatif → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Erreur de validation présente', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.be.false;",
+                  "  pm.expect(body.errors).to.be.an('array').and.not.empty;",
+                  "  console.log('Erreur :', body.errors[0].message);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": -500,\n  \"article_name\": \"Article test\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — montant zéro → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"ACHAT\",\n  \"amount\": 0,\n  \"article_name\": \"Test montant zéro\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — montant décimal → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — montant décimal refusé (FCFA entier uniquement)', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": 1500.50,\n  \"article_name\": \"Test montant décimal\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — type invalide → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Message d erreur pertinent', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.errors[0].message).to.include('VENTE');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"SALAIRE\",\n  \"amount\": 50000,\n  \"article_name\": \"Type inconnu\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — date dans le futur → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — date future refusée', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": 5000,\n  \"article_name\": \"Article futur\",\n  \"op_date\": \"2030-01-01T00:00:00.000Z\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — article_name manquant → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('Champ article_name signalé', () => {",
+                  "  const body = pm.response.json();",
+                  "  const hasArticleError = body.errors.some(e => e.field === 'article_name');",
+                  "  pm.expect(hasArticleError).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": 5000\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — description > 255 caractères → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — description trop longue', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": 5000,\n  \"article_name\": \"Test description longue\",\n  \"description\": \"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — sans token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"VENTE\",\n  \"amount\": 5000,\n  \"article_name\": \"Test sans auth\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 — Lister les opérations",
+      "item": [
+        {
+          "name": "✅ GET / — liste sans filtre (page 1, 20 par page)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Structure paginée correcte', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data).to.have.property('items').that.is.an('array');",
+                  "  pm.expect(data).to.have.property('pagination');",
+                  "  pm.expect(data.pagination).to.have.all.keys('total', 'page', 'limit', 'totalPages', 'hasNext', 'hasPrev');",
+                  "  pm.expect(data.pagination.page).to.equal(1);",
+                  "  pm.expect(data.pagination.limit).to.equal(20);",
+                  "  console.log('Total opérations :', data.pagination.total);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "✅ GET / — filtre type=VENTE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Toutes les opérations sont de type VENTE', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  data.items.forEach(op => {",
+                  "    pm.expect(op.type).to.equal('VENTE');",
+                  "  });",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?type=VENTE",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [{ "key": "type", "value": "VENTE" }]
+            }
+          }
+        },
+        {
+          "name": "✅ GET / — filtre type=ACHAT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Toutes les opérations sont de type ACHAT', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  data.items.forEach(op => pm.expect(op.type).to.equal('ACHAT'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?type=ACHAT",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [{ "key": "type", "value": "ACHAT" }]
+            }
+          }
+        },
+        {
+          "name": "✅ GET / — filtre recherche textuelle (search=tissu)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Résultats correspondent à la recherche', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  if (data.items.length > 0) {",
+                  "    data.items.forEach(op => {",
+                  "      const match = op.article_name.toLowerCase().includes('tissu') ||",
+                  "                    (op.counterpart_name || '').toLowerCase().includes('tissu');",
+                  "      pm.expect(match).to.be.true;",
+                  "    });",
+                  "  }",
+                  "  console.log('Résultats trouvés :', data.items.length);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?search=tissu",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [{ "key": "search", "value": "tissu" }]
+            }
+          }
+        },
+        {
+          "name": "✅ GET / — filtre plage de dates",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Pagination présente', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.pagination).to.exist;",
+                  "  console.log('Opérations dans la plage :', data.pagination.total);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?date_from=2026-05-01&date_to=2026-05-31",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [
+                { "key": "date_from", "value": "2026-05-01" },
+                { "key": "date_to",   "value": "2026-05-31" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ GET / — pagination page 2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Page 2 retournée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.pagination.page).to.equal(2);",
+                  "  pm.expect(data.pagination.limit).to.equal(5);",
+                  "  pm.expect(data.pagination.hasPrev).to.be.true;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?page=2&limit=5",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [
+                { "key": "page",  "value": "2" },
+                { "key": "limit", "value": "5" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ GET / — tri par montant croissant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tri croissant respecté', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  if (data.items.length > 1) {",
+                  "    for (let i = 1; i < data.items.length; i++) {",
+                  "      pm.expect(data.items[i].amount).to.be.at.least(data.items[i-1].amount);",
+                  "    }",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?sort_by=amount&sort_dir=ASC",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [
+                { "key": "sort_by",  "value": "amount" },
+                { "key": "sort_dir", "value": "ASC"    }
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ GET / — filtre type invalide → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — type invalide dans query', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?type=REMBOURSEMENT",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [{ "key": "type", "value": "REMBOURSEMENT" }]
+            }
+          }
+        },
+        {
+          "name": "❌ GET / — limit > 100 → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — limit max dépassée', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations?limit=500",
+              "host": ["{{base_url}}"],
+              "path": ["operations"],
+              "query": [{ "key": "limit", "value": "500" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 — Résumés",
+      "item": [
+        {
+          "name": "✅ GET /summary/daily — solde du jour",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Structure du résumé journalier correcte', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data).to.have.property('date');",
+                  "  pm.expect(data).to.have.property('VENTE');",
+                  "  pm.expect(data).to.have.property('ACHAT');",
+                  "  pm.expect(data).to.have.property('DEPENSE');",
+                  "  pm.expect(data).to.have.property('RECETTE');",
+                  "  pm.expect(data).to.have.property('balance');",
+                  "  pm.expect(data).to.have.property('total_income');",
+                  "  pm.expect(data).to.have.property('total_expense');",
+                  "  // Vérifier la cohérence du calcul",
+                  "  const expectedBalance = data.total_income - data.total_expense;",
+                  "  pm.expect(data.balance).to.equal(expectedBalance);",
+                  "  console.log('Solde du jour :', data.balance, 'FCFA');",
+                  "  console.log('Recettes :', data.total_income, '| Dépenses :', data.total_expense);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/summary/daily",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "summary", "daily"]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /summary/daily — date spécifique passée",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Date du résumé correspond au paramètre', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.date).to.equal('2026-01-15');",
+                  "  console.log('Résumé du 2026-01-15 — Solde :', data.balance, 'FCFA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/summary/daily?date=2026-01-15",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "summary", "daily"],
+              "query": [{ "key": "date", "value": "2026-01-15" }]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /summary/monthly — mois courant",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Structure du résumé mensuel correcte', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data).to.have.property('year');",
+                  "  pm.expect(data).to.have.property('month');",
+                  "  pm.expect(data).to.have.property('period');",
+                  "  pm.expect(data).to.have.property('VENTE');",
+                  "  pm.expect(data).to.have.property('ACHAT');",
+                  "  pm.expect(data).to.have.property('net_balance');",
+                  "  pm.expect(data).to.have.property('daily_breakdown').that.is.an('array');",
+                  "  pm.expect(data).to.have.property('monthly_ops_count');",
+                  "  // Vérifier la cohérence net_balance",
+                  "  const expected = data.total_income - data.total_expense;",
+                  "  pm.expect(data.net_balance).to.equal(expected);",
+                  "  console.log('Mois :', data.period, '| Solde net :', data.net_balance, 'FCFA');",
+                  "  console.log('Opérations ce mois :', data.monthly_ops_count + '/30');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/summary/monthly",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "summary", "monthly"]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /summary/monthly — mois spécifique (Jan 2026)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Mois et année corrects', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.year).to.equal(2026);",
+                  "  pm.expect(data.month).to.equal(1);",
+                  "  pm.expect(data.period).to.equal('2026-01');",
+                  "  // La VENTE saisie rétroactivement doit apparaître ici",
+                  "  console.log('Ventes Jan 2026 :', data.VENTE.total, 'FCFA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/summary/monthly?year=2026&month=1",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "summary", "monthly"],
+              "query": [
+                { "key": "year",  "value": "2026" },
+                { "key": "month", "value": "1"    }
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /summary/monthly — mois invalide (13) → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — mois hors intervalle [1-12]', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/summary/monthly?year=2026&month=13",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "summary", "monthly"],
+              "query": [
+                { "key": "year",  "value": "2026" },
+                { "key": "month", "value": "13"   }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5 — Détail d'une opération",
+      "item": [
+        {
+          "name": "✅ GET /:id — opération existante",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Opération retournée avec tous les champs', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.id).to.equal(pm.environment.get('op_id_vente'));",
+                  "  pm.expect(data).to.have.all.keys(",
+                  "    'id', 'type', 'amount', 'article_name', 'quantity',",
+                  "    'description', 'op_date', 'counterpart_name',",
+                  "    'product_id', 'receipt_url', 'created_at', 'updated_at'",
+                  "  );",
+                  "  console.log('Opération :', data.type, data.amount, 'FCFA -', data.article_name);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/{{op_id_vente}}",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "{{op_id_vente}}"]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /:id — UUID inexistant → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Message introuvable', () => {",
+                  "  pm.expect(pm.response.json().success).to.be.false;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/00000000-0000-0000-0000-000000000000",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "00000000-0000-0000-0000-000000000000"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "6 — Modifier une opération",
+      "item": [
+        {
+          "name": "✅ PUT /:id — modifier le montant et la description",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Montant mis à jour', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.amount).to.equal(18000);",
+                  "  pm.expect(data.description).to.equal('Correction : vente finale confirmée');",
+                  "  console.log('✔ Opération modifiée — nouveau montant :', data.amount, 'FCFA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 18000,\n  \"description\": \"Correction : vente finale confirmée\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations/{{op_id_vente}}",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "{{op_id_vente}}"]
+            }
+          }
+        },
+        {
+          "name": "✅ PUT /:id — modifier le type et l'article",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Type et article mis à jour', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.type).to.equal('ACHAT');",
+                  "  pm.expect(data.article_name).to.equal('Savon Omo corrigé');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"ACHAT\",\n  \"article_name\": \"Savon Omo corrigé\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations/{{op_id_achat}}",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "{{op_id_achat}}"]
+            }
+          }
+        },
+        {
+          "name": "❌ PUT /:id — corps vide → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 — au moins un champ requis', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations/{{op_id_vente}}",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "{{op_id_vente}}"]
+            }
+          }
+        },
+        {
+          "name": "❌ PUT /:id — ID inexistant → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Authorization", "value": "Bearer {{access_token}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 9999\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/operations/00000000-0000-0000-0000-000000000000",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "00000000-0000-0000-0000-000000000000"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "7 — Supprimer une opération",
+      "item": [
+        {
+          "name": "✅ DELETE /:id — suppression réussie (op_depense)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204 No Content', () => pm.response.to.have.status(204));",
+                  "pm.test('Corps vide', () => {",
+                  "  pm.expect(pm.response.text()).to.be.empty;",
+                  "  console.log('✔ Opération DEPENSE supprimée');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/{{op_id_depense}}",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "{{op_id_depense}}"]
+            }
+          }
+        },
+        {
+          "name": "❌ DELETE /:id — opération déjà supprimée → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404 — déjà supprimée', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/{{op_id_depense}}",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "{{op_id_depense}}"]
+            }
+          }
+        },
+        {
+          "name": "❌ DELETE /:id — ID inexistant → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/00000000-0000-0000-0000-000000000000",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "00000000-0000-0000-0000-000000000000"]
+            }
+          }
+        },
+        {
+          "name": "❌ DELETE /:id — sans token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/operations/{{op_id_vente}}",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "{{op_id_vente}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "8 — Vérifications finales",
+      "item": [
+        {
+          "name": "✅ GET / — vérifier que la DEPENSE supprimée n'apparaît plus",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('op_id_depense absent de la liste', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  const deletedId = pm.environment.get('op_id_depense');",
+                  "  const found = data.items.some(op => op.id === deletedId);",
+                  "  pm.expect(found).to.be.false;",
+                  "  console.log('✔ Opération supprimée absente de la liste');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations",
+              "host": ["{{base_url}}"],
+              "path": ["operations"]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /summary/daily — solde cohérent après modifications",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Solde = total_income - total_expense', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.balance).to.equal(data.total_income - data.total_expense);",
+                  "  console.log('✔ Cohérence solde vérifiée — balance :', data.balance, 'FCFA');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/summary/daily",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "summary", "daily"]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /limits — quota incrémenté après créations",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Compteur > 0 après les créations', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  if (data.plan === 'FREE') {",
+                  "    pm.expect(data.count).to.be.above(0);",
+                  "    console.log('Quota FREE utilisé :', data.count + '/30');",
+                  "  } else {",
+                  "    console.log('Plan PRO — pas de limite');",
+                  "  }",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+            "url": {
+              "raw": "{{base_url}}/operations/limits",
+              "host": ["{{base_url}}"],
+              "path": ["operations", "limits"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+# Environnement — NE JAMAIS COMMITTER
+.env
+.env.local
+.env.staging
+.env.production
+.env.railway
+
+# Dépendances
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Coverage Jest
+coverage/
+.nyc_output/
+
+# Build / cache
+dist/
+build/
+.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.agents/
+.codex/
+
+# Uploads temporaires
+uploads/
+tmp/

@@ -1,0 +1,612 @@
+{
+  "info": {
+    "name": "LISSAFI-P — Module Stock (M3)",
+    "description": "Collection de test du module M3 — Stock et mouvements.\n\n## Workflow de test recommandé\n1. Se connecter pour obtenir access_token\n2. Créer un produit de test via /products et sauvegarder stock_product_id\n3. POST /stock/movement — ENTREE\n4. POST /stock/movement — SORTIE\n5. POST /stock/movement — AJUSTEMENT\n6. GET /stock/movements/:productId — historique\n7. GET /stock/alerts — produits sous seuil\n8. GET /stock/valuation — valorisation totale\n9. Cas d'erreur — auth, validation, stock insuffisant\n\n## Variables requises\nImporter `LISSAFI-P_Local.postman_environment.json`.\nLe token peut être récupéré via la collection Auth ou via le dossier prérequis.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "lissafi-stock-collection-v1"
+  },
+  "variable": [],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Pré-script global — rien ici pour l'instant"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0 — Pré-requis",
+      "description": "Connexion et création d'un produit dédié aux tests Stock.",
+      "item": [
+        {
+          "name": "ℹ login — obtenir un access_token valide",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tokens sauvegardés', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.accessToken).to.be.a('string');",
+                  "  pm.environment.set('access_token', data.accessToken);",
+                  "  pm.environment.set('refresh_token', data.refreshToken);",
+                  "  console.log('✔ access_token prêt pour les tests Stock');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"{{identifier}}\",\n  \"password\": \"{{test_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ POST /products — créer produit de test stock",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Produit stock sauvegardé', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.id).to.be.a('string');",
+                  "  pm.expect(data.stock_qty).to.equal(5);",
+                  "  pm.environment.set('stock_product_id', data.id);",
+                  "  console.log('✔ stock_product_id sauvegardé :', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Riz parfumé 25kg - Stock Postman\",\n  \"description\": \"Produit créé pour tester les mouvements de stock\",\n  \"unit\": \"SAC\",\n  \"purchase_price\": 18000,\n  \"sale_price\": 21000,\n  \"stock_qty\": 5,\n  \"alert_threshold\": 3\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1 — Mouvements de stock",
+      "item": [
+        {
+          "name": "✅ POST /movement — ENTREE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Entrée enregistrée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.id).to.be.a('string');",
+                  "  pm.expect(data.movement_type).to.equal('ENTREE');",
+                  "  pm.expect(data.quantity).to.equal(10);",
+                  "  pm.expect(data.stock_after).to.equal(data.stock_after + 10);",
+                  "  pm.environment.set('stock_movement_entree_id', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{stock_product_id}}\",\n  \"movement_type\": \"ENTREE\",\n  \"quantity\": 10,\n  \"reason\": \"Réception fournisseur\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/stock/movement",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movement"
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ POST /movement — SORTIE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Sortie enregistrée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.movement_type).to.equal('SORTIE');",
+                  "  pm.expect(data.quantity).to.equal(4);",
+                  "  pm.expect(data.stock_after).to.equal(data.stock_after - 4);",
+                  "  pm.environment.set('stock_movement_sortie_id', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{stock_product_id}}\",\n  \"movement_type\": \"SORTIE\",\n  \"quantity\": 4,\n  \"reason\": \"Vente comptoir\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/stock/movement",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movement"
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ POST /movement — AJUSTEMENT",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Ajustement enregistré', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.movement_type).to.equal('AJUSTEMENT');",
+                  "  pm.expect(data.stock_after).to.equal(2);",
+                  "  pm.environment.set('stock_movement_ajustement_id', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{stock_product_id}}\",\n  \"movement_type\": \"AJUSTEMENT\",\n  \"quantity\": 2,\n  \"reason\": \"Inventaire physique\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/stock/movement",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movement"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 — Historique, alertes et valorisation",
+      "item": [
+        {
+          "name": "✅ GET /movements/:productId — historique complet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Historique paginé', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.items).to.be.an('array');",
+                  "  pm.expect(data.items.length).to.be.at.least(1);",
+                  "  pm.expect(data.pagination).to.have.property('total');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/movements/{{stock_product_id}}?page=1&limit=20",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movements",
+                "{{stock_product_id}}"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /movements/:productId — filtre SORTIE",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Filtre SORTIE valide', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.items).to.be.an('array');",
+                  "  data.items.forEach((item) => pm.expect(item.movement_type).to.equal('SORTIE'));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/movements/{{stock_product_id}}?movement_type=SORTIE&page=1&limit=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movements",
+                "{{stock_product_id}}"
+              ],
+              "query": [
+                {
+                  "key": "movement_type",
+                  "value": "SORTIE"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /alerts — alertes de rupture",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Structure alertes correcte', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.alerts).to.be.an('array');",
+                  "  pm.expect(data.count).to.equal(data.alerts.length);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/alerts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "alerts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /valuation — valorisation totale",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Structure valorisation correcte', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data).to.have.property('product_count');",
+                  "  pm.expect(data).to.have.property('total_units');",
+                  "  pm.expect(data).to.have.property('total_purchase_value');",
+                  "  pm.expect(data).to.have.property('total_sale_value');",
+                  "  pm.expect(data.top_products).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/valuation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "valuation"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 — Cas d'erreur",
+      "item": [
+        {
+          "name": "❌ POST /movement — type invalide → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('erreurs de validation présentes', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.be.false;",
+                  "  pm.expect(body.errors).to.be.an('array').that.is.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{stock_product_id}}\",\n  \"movement_type\": \"RETOUR\",\n  \"quantity\": 1,\n  \"reason\": \"Type invalide\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/stock/movement",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movement"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ POST /movement — stock insuffisant → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"product_id\": \"{{stock_product_id}}\",\n  \"movement_type\": \"SORTIE\",\n  \"quantity\": 999999,\n  \"reason\": \"Test stock insuffisant\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/stock/movement",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movement"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /alerts — sans token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/stock/alerts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "alerts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /movements/:productId — UUID inexistant → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/stock/movements/00000000-0000-4000-8000-000000000000",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "stock",
+                "movements",
+                "00000000-0000-4000-8000-000000000000"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

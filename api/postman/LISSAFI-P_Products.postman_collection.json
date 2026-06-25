@@ -1,0 +1,595 @@
+{
+  "info": {
+    "name": "LISSAFI-P — Module Products (M3)",
+    "description": "Collection de test du module M3 — Catalogue produits.\n\n## Workflow de test recommandé\n1. Se connecter pour obtenir access_token\n2. GET /limits — vérifier le quota FREE\n3. POST /products — créer un produit et sauvegarder product_id\n4. GET /products — lister le catalogue avec filtres\n5. GET /products/:id — détail du produit\n6. PUT /products/:id — modifier le produit\n7. DELETE /products/:id — soft delete\n8. Cas d'erreur — validation, auth, ressource introuvable\n\n## Variables requises\nImporter `LISSAFI-P_Local.postman_environment.json`.\nLe token peut être récupéré via la collection Auth ou via le dossier prérequis.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_postman_id": "lissafi-products-collection-v1"
+  },
+  "variable": [],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Pré-script global — rien ici pour l'instant"
+        ]
+      }
+    }
+  ],
+  "item": [
+    {
+      "name": "0 — Pré-requis : connexion",
+      "description": "Requête utilitaire pour obtenir un access_token valide avant de tester Products.",
+      "item": [
+        {
+          "name": "ℹ login — obtenir un access_token valide",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Tokens sauvegardés', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.accessToken).to.be.a('string');",
+                  "  pm.environment.set('access_token', data.accessToken);",
+                  "  pm.environment.set('refresh_token', data.refreshToken);",
+                  "  console.log('✔ access_token prêt pour les tests Products');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identifier\": \"{{identifier}}\",\n  \"password\": \"{{test_password}}\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/login",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "auth",
+                "login"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "1 — Quota produits",
+      "item": [
+        {
+          "name": "✅ GET /limits — quota produits",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Structure du quota correcte', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data).to.have.property('count');",
+                  "  pm.expect(data).to.have.property('limit');",
+                  "  pm.expect(data).to.have.property('canCreate');",
+                  "  pm.expect(data).to.have.property('plan');",
+                  "  pm.expect(data.count).to.be.a('number').and.at.least(0);",
+                  "  console.log('Produits :', data.count + ' / ' + data.limit, '| plan :', data.plan);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/limits",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "limits"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /limits — sans token → 401",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 401', () => pm.response.to.have.status(401));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/products/limits",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "limits"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2 — Créer un produit",
+      "item": [
+        {
+          "name": "✅ POST / — produit complet",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('Produit créé et sauvegardé', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.id).to.be.a('string');",
+                  "  pm.expect(data.name).to.equal('Savon Omo 1kg');",
+                  "  pm.expect(data.stock_qty).to.equal(12);",
+                  "  pm.expect(data).to.have.property('margin_rate');",
+                  "  pm.expect(data).to.have.property('stock_value');",
+                  "  pm.environment.set('product_id', data.id);",
+                  "  console.log('✔ product_id sauvegardé :', data.id);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Savon Omo 1kg\",\n  \"description\": \"Produit de test créé depuis Postman\",\n  \"unit\": \"PCS\",\n  \"purchase_price\": 900,\n  \"sale_price\": 1200,\n  \"stock_qty\": 12,\n  \"alert_threshold\": 5\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ POST / — nom manquant → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('erreurs de validation présentes', () => {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.success).to.be.false;",
+                  "  pm.expect(body.errors).to.be.an('array').that.is.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sale_price\": 1000,\n  \"stock_qty\": 2\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/products",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3 — Catalogue et détail",
+      "item": [
+        {
+          "name": "✅ GET / — catalogue paginé",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Réponse paginée', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.items).to.be.an('array');",
+                  "  pm.expect(data.pagination).to.have.property('total');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products?page=1&limit=20&sort_by=name&sort_dir=ASC",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "sort_by",
+                  "value": "name"
+                },
+                {
+                  "key": "sort_dir",
+                  "value": "ASC"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ GET / — recherche + low_stock_only",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Liste filtrée valide', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.items).to.be.an('array');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products?search=Savon&low_stock_only=false&page=1&limit=10",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products"
+              ],
+              "query": [
+                {
+                  "key": "search",
+                  "value": "Savon"
+                },
+                {
+                  "key": "low_stock_only",
+                  "value": "false"
+                },
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ GET /:id — détail produit",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Produit correct', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.id).to.equal(pm.environment.get('product_id'));",
+                  "  pm.expect(data).to.have.property('is_low_stock');",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /:id — UUID inexistant → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/00000000-0000-4000-8000-000000000000",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "00000000-0000-4000-8000-000000000000"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4 — Modifier et supprimer",
+      "item": [
+        {
+          "name": "✅ PUT /:id — modifier prix et seuil",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Produit modifié', () => {",
+                  "  const { data } = pm.response.json();",
+                  "  pm.expect(data.id).to.equal(pm.environment.get('product_id'));",
+                  "  pm.expect(data.sale_price).to.equal(1300);",
+                  "  pm.expect(data.alert_threshold).to.equal(4);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sale_price\": 1300,\n  \"alert_threshold\": 4,\n  \"description\": \"Produit de test modifié depuis Postman\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ PUT /:id — corps vide → 400",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            },
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "✅ DELETE /:id — soft delete",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 204', () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          }
+        },
+        {
+          "name": "❌ GET /:id — après suppression → 404",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('success = false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{access_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/products/{{product_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "products",
+                "{{product_id}}"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
